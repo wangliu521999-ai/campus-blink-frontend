@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 // 注意这里：我们把顶部的 import AMapLoader 删掉了！
 
-const API_URL = "http://127.0.0.1:8000/api/bubbles";
-const WS_URL = "ws://127.0.0.1:8000/ws";
+const API_URL = "https://campus-blink-backend.onrender.com/api/bubbles";
+const WS_URL = "wss://campus-blink-backend.onrender.com/ws";
 
 export default function Home() {
   const mapRef = useRef<any>(null);
