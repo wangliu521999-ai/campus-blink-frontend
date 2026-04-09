@@ -2,14 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 
-// ⚠️ 终极警告：这里必须是你线上的地址，绝不能是 127.0.0.1！否则手机打死也连不上！
+// ⚠️ 终极警告：这里必须是你线上的地址！
 const API_URL = "https://campus-blink-backend.onrender.com/api/bubbles";
 const WS_URL = "wss://campus-blink-backend.onrender.com/ws";
 
 export default function Home() {
   const mapRef = useRef<any>(null);
-  const clusterRef = useRef<any>(null); // 🚀 新增：保存点聚合对象的管家
-  const aMapRef = useRef<any>(null);   // 缓存 AMap 实例，避免反复从 window 取
+  const markersRef = useRef<any[]>([]); // 🚀 修复：不再用复杂的聚合管家，直接用一个简单的数组管理气泡
+  const aMapRef = useRef<any>(null);   
   const [isMapLoaded, setIsMapLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [currentPos, setCurrentPos] = useState<[number, number] | null>(null);
@@ -41,8 +41,8 @@ export default function Home() {
       AMapLoader.load({
         key: "f96aae15f8dfda913d2f6cc989677c66",          
         version: "2.0",
-        // 🚀 新增：加载高德的点聚合插件
-        plugins: ["AMap.Geolocation", "AMap.MarkerClusterer"],
+        // 🚀 修复：移除了坑人的 MarkerClusterer 插件
+        plugins: ["AMap.Geolocation"],
       }).then((AMap) => {
           mapRef.current = new AMap.Map("map-container", {
             zoom: 16,
@@ -66,15 +66,19 @@ export default function Home() {
 
   const fetchBubbles = async (AMapInstance?: any) => {
     const AMap = AMapInstance ?? aMapRef.current;
-    if (!AMap) return;
+    if (!AMap || !mapRef.current) return;
     try {
       const res = await fetch(API_URL);
       const resData = await res.json();
 
-      // 无有效数据时静默跳过，不清空地图
-      if (resData.status !== "success" || !mapRef.current) return;
+      if (resData.status !== "success") return;
 
-      const markers: any[] = [];
+      // 🚀 核心修复：直接从地图上清理旧气泡，简单暴力且 100% 有效
+      if (markersRef.current.length > 0) {
+        mapRef.current.remove(markersRef.current);
+      }
+
+      const newMarkers: any[] = [];
 
       resData.data.forEach((bubble: any) => {
         const timeTagHtml = bubble.category === 'activity' && bubble.start_time && bubble.end_time
@@ -96,18 +100,15 @@ export default function Home() {
         });
 
         marker.on('click', () => { joinChatRoom(bubble.id); });
-        markers.push(marker);
+        
+        // 🚀 核心修复：直接把气泡画到地图上！
+        mapRef.current.add(marker); 
+        newMarkers.push(marker);
       });
 
-      if (clusterRef.current) {
-        // 🚀 优化：复用现有 cluster，调用 setMarkers 平滑替换数据，无 DOM 销毁重建
-        clusterRef.current.setMarkers(markers);
-      } else {
-        clusterRef.current = new AMap.MarkerClusterer(mapRef.current, markers, {
-          gridSize: 60,
-          maxZoom: 18,
-        });
-      }
+      // 把新画上去的气泡存起来，下次刷新时才知道该删哪些
+      markersRef.current = newMarkers;
+
     } catch (e) {
       console.log("获取气泡失败，等待服务器连接");
     }
