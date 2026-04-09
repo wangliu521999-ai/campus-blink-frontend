@@ -2,17 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 
+// ⚠️ 终极警告：这里必须是你线上的地址，绝不能是 127.0.0.1！否则手机打死也连不上！
 const API_URL = "https://campus-blink-backend.onrender.com/api/bubbles";
 const WS_URL = "wss://campus-blink-backend.onrender.com/ws";
 
 export default function Home() {
   const mapRef = useRef<any>(null);
+  const clusterRef = useRef<any>(null); // 🚀 新增：保存点聚合对象的管家
   const [isMapLoaded, setIsMapLoaded] = useState(false);
   const [currentPos, setCurrentPos] = useState<[number, number] | null>(null);
   
   const [showForm, setShowForm] = useState(false);
   const [text, setText] = useState("");
-  const [icon, setIcon] = useState("📍"); // 默认改成更通用的定位符
+  const [icon, setIcon] = useState("📍");
 
   const [category, setCategory] = useState("chat");
   const [startTime, setStartTime] = useState("");
@@ -35,7 +37,8 @@ export default function Home() {
       AMapLoader.load({
         key: "f96aae15f8dfda913d2f6cc989677c66",          
         version: "2.0",
-        plugins: ["AMap.Geolocation"],
+        // 🚀 新增：加载高德的点聚合插件
+        plugins: ["AMap.Geolocation", "AMap.MarkerClusterer"],
       }).then((AMap) => {
           mapRef.current = new AMap.Map("map-container", {
             zoom: 16,
@@ -62,8 +65,14 @@ export default function Home() {
       const resData = await res.json();
       
       if (resData.status === "success" && mapRef.current) {
-        mapRef.current.clearMap(); 
+        // 🚀 如果之前有聚合点，先清空它
+        if (clusterRef.current) {
+          clusterRef.current.setMap(null);
+        }
         
+        // 我们不再直接往地图上加气泡，而是先全部放进一个大数组里
+        const markers: any[] = [];
+
         resData.data.forEach((bubble: any) => {
           const timeTagHtml = bubble.category === 'activity' && bubble.start_time && bubble.end_time
             ? `<div class="text-[10px] text-green-700 font-bold mt-1 bg-green-100/80 px-2 py-0.5 rounded w-max border border-green-200">⏰ ${bubble.start_time} - ${bubble.end_time}</div>`
@@ -87,7 +96,13 @@ export default function Home() {
             joinChatRoom(bubble.id);
           });
 
-          mapRef.current.add(marker);
+          markers.push(marker); // 装入数组
+        });
+
+        // 🚀 核心魔法：使用点聚合技术，把挤在一起的图标合成一个大圆圈！
+        clusterRef.current = new AMapInstance.MarkerClusterer(mapRef.current, markers, {
+          gridSize: 60, // 聚合范围，数字越大越容易合体
+          maxZoom: 18,  // 最大放大级别，放得足够大时它们才会散开
         });
       }
     } catch (e) {
@@ -100,11 +115,8 @@ export default function Home() {
     
     const newBubble = {
       user_id: "user_" + Math.floor(Math.random() * 10000),
-      lat: currentPos[1], 
-      lng: currentPos[0], 
-      icon: icon || "📍", // 如果用户删空了，给个保底
-      text: text, 
-      expire_minutes: expireMinutes,
+      lat: currentPos[1], lng: currentPos[0], 
+      icon: icon || "📍", text: text, expire_minutes: expireMinutes,
       category: category,
       start_time: category === "activity" && startTime ? startTime : null,
       end_time: category === "activity" && endTime ? endTime : null,
@@ -114,24 +126,15 @@ export default function Home() {
       await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newBubble) });
       resetForm();
       fetchBubbles((window as any).AMap); 
-    } catch (e) { 
-      alert("发送失败，请检查服务器连接"); 
-    }
+    } catch (e) { alert("发送失败，请检查服务器连接"); }
   };
 
   const resetForm = () => {
-    setText(""); 
-    setShowForm(false);
-    setCategory("chat");
-    setStartTime("");
-    setEndTime("");
-    setExpireMinutes(120);
-    setIcon("📍");
+    setText(""); setShowForm(false); setCategory("chat"); setStartTime(""); setEndTime(""); setExpireMinutes(120); setIcon("📍");
   };
 
   const toggleCategory = (cat: string) => {
-    setCategory(cat);
-    setExpireMinutes(cat === "activity" ? 720 : 120);
+    setCategory(cat); setExpireMinutes(cat === "activity" ? 720 : 120);
   };
 
   const joinChatRoom = (bubbleId: string) => {
@@ -157,7 +160,6 @@ export default function Home() {
   return (
     <main className="relative w-full h-screen overflow-hidden bg-gray-100">
       <div id="map-container" className="absolute inset-0 w-full h-full" />
-
       <div className="absolute bottom-0 left-0 w-full z-10 flex justify-center pb-12 px-4">
         {activeChat ? (
            <div className="w-full max-w-md bg-white/80 backdrop-blur-xl border border-white shadow-2xl rounded-[2rem] p-6 flex flex-col h-80 animate-in slide-in-from-bottom-8">
@@ -165,7 +167,7 @@ export default function Home() {
                 <h2 className="font-bold text-gray-800">临时聊天室 🔒</h2>
                 <button onClick={exitChat} className="text-red-500 font-medium hover:bg-red-50 px-3 py-1 rounded-full text-sm">撤退</button>
              </div>
-             <div className="flex-1 overflow-y-auto mb-4 space-y-2">
+             <div className="flex-1 overflow-y-auto mb-4 space-y-2 flex flex-col">
                 {messages.length === 0 ? <p className="text-gray-400 text-sm text-center mt-10">对方正在等你的消息...</p> : null}
                 {messages.map((msg, idx) => (
                   <div key={idx} className="bg-blue-100 text-blue-900 px-4 py-2 rounded-2xl w-fit max-w-[80%] break-words shadow-sm">{msg}</div>
@@ -189,77 +191,23 @@ export default function Home() {
               </>
             ) : (
               <div className="w-full space-y-4 animate-in fade-in slide-in-from-bottom-4">
-                
-                {/* 1. 分类选择器 */}
                 <div className="flex gap-2 w-full">
-                  <button
-                    onClick={() => toggleCategory("chat")}
-                    className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${
-                      category === "chat" ? "bg-blue-100 text-blue-700 ring-2 ring-blue-400" : "bg-white/50 text-gray-500 hover:bg-white"
-                    }`}
-                  >
-                    💬 吐槽/心情
-                  </button>
-                  <button
-                    onClick={() => toggleCategory("activity")}
-                    className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${
-                      category === "activity" ? "bg-green-100 text-green-700 ring-2 ring-green-400" : "bg-white/50 text-gray-500 hover:bg-white"
-                    }`}
-                  >
-                    🏀 约局/活动
-                  </button>
+                  <button onClick={() => toggleCategory("chat")} className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${category === "chat" ? "bg-blue-100 text-blue-700 ring-2 ring-blue-400" : "bg-white/50 text-gray-500 hover:bg-white"}`}>💬 吐槽/心情</button>
+                  <button onClick={() => toggleCategory("activity")} className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${category === "activity" ? "bg-green-100 text-green-700 ring-2 ring-green-400" : "bg-white/50 text-gray-500 hover:bg-white"}`}>🏀 约局/活动</button>
                 </div>
-
-                {/* ================= 🚀 新增：高度自由的表情栏 ================= */}
                 <div className="flex items-center space-x-2 bg-white/40 p-1.5 rounded-2xl border border-white/60">
-                  {/* 自定义表情输入框 */}
                   <div className="relative flex-shrink-0 group">
-                    <input
-                      type="text"
-                      value={icon}
-                      onChange={(e) => {
-                        // 巧妙的逻辑：用户输入多个表情，我们永远只截取最后一个，保证只显示一个图标
-                        const val = e.target.value;
-                        const chars = Array.from(val);
-                        if (chars.length > 0) {
-                          setIcon(chars[chars.length - 1]);
-                        } else {
-                          setIcon("");
-                        }
-                      }}
-                      className="w-12 h-12 text-2xl text-center rounded-xl bg-white shadow-sm border border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer placeholder-gray-300"
-                      placeholder="✍️"
-                    />
+                    <input type="text" value={icon} onChange={(e) => { const chars = Array.from(e.target.value); setIcon(chars.length > 0 ? chars[chars.length - 1] : ""); }} className="w-12 h-12 text-2xl text-center rounded-xl bg-white shadow-sm border border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer placeholder-gray-300" placeholder="✍️" />
                     <div className="absolute -top-2 -right-2 bg-gradient-to-r from-blue-500 to-indigo-500 text-white text-[9px] px-1.5 py-0.5 rounded-full font-bold shadow-sm pointer-events-none">自定义</div>
                   </div>
-
                   <div className="w-px h-6 bg-gray-300 mx-1"></div>
-
-                  {/* 快捷推荐滚动列表 */}
                   <div className="flex space-x-2 flex-1 overflow-x-auto scrollbar-hide py-1">
                     {['🍚', '📚', '🏀', '🎮', '🎤', '🏃', '🐱', '☕️'].map(emoji => (
-                      <button
-                        key={emoji}
-                        onClick={() => setIcon(emoji)}
-                        className={`text-xl flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl transition-all ${
-                          icon === emoji ? 'bg-white shadow-md scale-110 border border-gray-100' : 'hover:bg-white/70'
-                        }`}
-                      >
-                        {emoji}
-                      </button>
+                      <button key={emoji} onClick={() => setIcon(emoji)} className={`text-xl flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl transition-all ${icon === emoji ? 'bg-white shadow-md scale-110 border border-gray-100' : 'hover:bg-white/70'}`}>{emoji}</button>
                     ))}
                   </div>
                 </div>
-
-                <input 
-                  type="text" 
-                  value={text} 
-                  onChange={(e) => setText(e.target.value)} 
-                  placeholder={category === "chat" ? "此时此刻想说点什么..." : "一缺三，速来（比如：二食堂开黑）..."} 
-                  className="w-full px-4 py-3 rounded-xl bg-white/70 border border-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-800 shadow-inner" 
-                />
-
-                {/* 2. 约局时间选择 */}
+                <input type="text" value={text} onChange={(e) => setText(e.target.value)} placeholder={category === "chat" ? "此时此刻想说点什么..." : "一缺三，速来（比如：二食堂开黑）..."} className="w-full px-4 py-3 rounded-xl bg-white/70 border border-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-800 shadow-inner" />
                 {category === "activity" && (
                   <div className="flex gap-2 items-center w-full bg-green-50/80 p-2.5 rounded-xl border border-green-200 shadow-inner animate-in zoom-in-95">
                     <span className="text-xs text-green-700 font-bold whitespace-nowrap pl-1">活动时间:</span>
@@ -268,29 +216,14 @@ export default function Home() {
                     <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="border-none p-1.5 rounded-lg bg-white text-sm flex-1 focus:ring-2 focus:ring-green-400 outline-none text-gray-700 shadow-sm" />
                   </div>
                 )}
-
-                {/* 3. 存活时长选择器 */}
                 <div className="pt-1">
                   <p className="text-[11px] text-gray-400 mb-1.5 ml-1 font-medium">气泡将在多久后消失？</p>
                   <div className="flex bg-gray-100/50 p-1 rounded-xl gap-1">
-                    {[
-                      { label: "🚀 30m", val: 30 },
-                      { label: "⏳ 2h", val: 120 },
-                      { label: "📅 12h", val: 720 },
-                    ].map((item) => (
-                      <button
-                        key={item.val}
-                        onClick={() => setExpireMinutes(item.val)}
-                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
-                          expireMinutes === item.val ? "bg-white text-gray-800 shadow-sm" : "text-gray-400 hover:text-gray-600"
-                        }`}
-                      >
-                        {item.label}
-                      </button>
+                    {[{ label: "🚀 30m", val: 30 }, { label: "⏳ 2h", val: 120 }, { label: "📅 12h", val: 720 }].map((item) => (
+                      <button key={item.val} onClick={() => setExpireMinutes(item.val)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition-all ${expireMinutes === item.val ? "bg-white text-gray-800 shadow-sm" : "text-gray-400 hover:text-gray-600"}`}>{item.label}</button>
                     ))}
                   </div>
                 </div>
-
                 <div className="flex space-x-3 mt-2">
                   <button onClick={resetForm} className="flex-1 py-3 bg-gray-200/50 hover:bg-gray-200/80 text-gray-700 font-semibold rounded-xl transition-colors">取消</button>
                   <button onClick={handleFlash} className="flex-2 w-2/3 py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-xl shadow-md transition-transform active:scale-95">发射气泡</button>
