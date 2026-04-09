@@ -9,7 +9,9 @@ const WS_URL = "wss://campus-blink-backend.onrender.com/ws";
 export default function Home() {
   const mapRef = useRef<any>(null);
   const clusterRef = useRef<any>(null); // 🚀 新增：保存点聚合对象的管家
+  const aMapRef = useRef<any>(null);   // 缓存 AMap 实例，避免反复从 window 取
   const [isMapLoaded, setIsMapLoaded] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [currentPos, setCurrentPos] = useState<[number, number] | null>(null);
   
   const [showForm, setShowForm] = useState(false);
@@ -20,6 +22,8 @@ export default function Home() {
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [expireMinutes, setExpireMinutes] = useState(120);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [messages, setMessages] = useState<string[]>([]);
@@ -51,58 +55,57 @@ export default function Home() {
             if (status === 'complete') setCurrentPos([result.position.lng, result.position.lat]);
           });
 
+          aMapRef.current = AMap;
           setIsMapLoaded(true);
-          fetchBubbles(AMap); 
-      }).catch(e => console.error(e));
+          fetchBubbles(AMap).finally(() => setIsLoading(false));
+      }).catch(e => { console.error(e); setIsLoading(false); });
     });
 
     return () => mapRef.current?.destroy();
   }, []);
 
-  const fetchBubbles = async (AMapInstance: any) => {
+  const fetchBubbles = async (AMapInstance?: any) => {
+    const AMap = AMapInstance ?? aMapRef.current;
+    if (!AMap) return;
     try {
       const res = await fetch(API_URL);
       const resData = await res.json();
-      
-      if (resData.status === "success" && mapRef.current) {
-        // 🚀 如果之前有聚合点，先清空它
-        if (clusterRef.current) {
-          clusterRef.current.setMap(null);
-        }
-        
-        // 我们不再直接往地图上加气泡，而是先全部放进一个大数组里
-        const markers: any[] = [];
 
-        resData.data.forEach((bubble: any) => {
-          const timeTagHtml = bubble.category === 'activity' && bubble.start_time && bubble.end_time
-            ? `<div class="text-[10px] text-green-700 font-bold mt-1 bg-green-100/80 px-2 py-0.5 rounded w-max border border-green-200">⏰ ${bubble.start_time} - ${bubble.end_time}</div>`
-            : '';
+      // 无有效数据时静默跳过，不清空地图
+      if (resData.status !== "success" || !mapRef.current) return;
 
-          const marker = new AMapInstance.Marker({
-            position: [bubble.lng, bubble.lat],
-            content: `
-              <div class="bg-white px-3 py-2 rounded-2xl shadow-lg border border-gray-100 flex flex-col animate-bounce cursor-pointer hover:bg-gray-50 transition-colors">
-                <div class="flex items-center space-x-2">
-                  <span class="text-xl">${bubble.icon}</span>
-                  <span class="text-sm font-medium text-gray-800">${bubble.text}</span>
-                </div>
-                ${timeTagHtml}
+      const markers: any[] = [];
+
+      resData.data.forEach((bubble: any) => {
+        const timeTagHtml = bubble.category === 'activity' && bubble.start_time && bubble.end_time
+          ? `<div class="text-[10px] text-green-700 font-bold mt-1 bg-green-100/80 px-2 py-0.5 rounded w-max border border-green-200">⏰ ${bubble.start_time} - ${bubble.end_time}</div>`
+          : '';
+
+        const marker = new AMap.Marker({
+          position: [bubble.lng, bubble.lat],
+          content: `
+            <div class="bg-white px-3 py-2 rounded-2xl shadow-lg border border-gray-100 flex flex-col animate-bounce cursor-pointer hover:bg-gray-50 transition-colors">
+              <div class="flex items-center space-x-2">
+                <span class="text-xl">${bubble.icon}</span>
+                <span class="text-sm font-medium text-gray-800">${bubble.text}</span>
               </div>
-            `,
-            offset: new AMapInstance.Pixel(-50, -50),
-          });
-          
-          marker.on('click', () => {
-            joinChatRoom(bubble.id);
-          });
-
-          markers.push(marker); // 装入数组
+              ${timeTagHtml}
+            </div>
+          `,
+          offset: new AMap.Pixel(-50, -50),
         });
 
-        // 🚀 核心魔法：使用点聚合技术，把挤在一起的图标合成一个大圆圈！
-        clusterRef.current = new AMapInstance.MarkerClusterer(mapRef.current, markers, {
-          gridSize: 60, // 聚合范围，数字越大越容易合体
-          maxZoom: 18,  // 最大放大级别，放得足够大时它们才会散开
+        marker.on('click', () => { joinChatRoom(bubble.id); });
+        markers.push(marker);
+      });
+
+      if (clusterRef.current) {
+        // 🚀 优化：复用现有 cluster，调用 setMarkers 平滑替换数据，无 DOM 销毁重建
+        clusterRef.current.setMarkers(markers);
+      } else {
+        clusterRef.current = new AMap.MarkerClusterer(mapRef.current, markers, {
+          gridSize: 60,
+          maxZoom: 18,
         });
       }
     } catch (e) {
@@ -111,22 +114,47 @@ export default function Home() {
   };
 
   const handleFlash = async () => {
-    if (!currentPos || !text) return;
-    
+    if (!currentPos) {
+      alert('正在获取您的精准位置，请稍等几秒后再试~');
+      return;
+    }
+    if (!text) return;
+
     const newBubble = {
       user_id: "user_" + Math.floor(Math.random() * 10000),
-      lat: currentPos[1], lng: currentPos[0], 
+      lat: currentPos[1], lng: currentPos[0],
       icon: icon || "📍", text: text, expire_minutes: expireMinutes,
       category: category,
       start_time: category === "activity" && startTime ? startTime : null,
       end_time: category === "activity" && endTime ? endTime : null,
     };
 
+    setIsSubmitting(true);
     try {
-      await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newBubble) });
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newBubble),
+      });
+
+      if (!res.ok) {
+        let errMsg = `发送失败（${res.status}）`;
+        try {
+          const errData = await res.json();
+          if (errData.detail) errMsg = errData.detail;
+          else if (errData.message) errMsg = errData.message;
+        } catch (_) {}
+        alert(errMsg);
+        return;
+      }
+
       resetForm();
-      fetchBubbles((window as any).AMap); 
-    } catch (e) { alert("发送失败，请检查服务器连接"); }
+      fetchBubbles();
+    } catch (e) {
+      alert("网络异常，请检查连接后重试");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const resetForm = () => {
@@ -159,6 +187,17 @@ export default function Home() {
 
   return (
     <main className="relative w-full h-screen overflow-hidden bg-gray-100">
+      {isLoading && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 to-indigo-100">
+          <div className="flex flex-col items-center space-y-5 p-10 rounded-3xl bg-white/80 backdrop-blur-xl shadow-2xl border border-white/60">
+            <div className="w-14 h-14 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <div className="space-y-1 text-center">
+              <p className="text-xl font-bold text-gray-800 tracking-wider">校内闪现</p>
+              <p className="text-sm text-gray-500">正在连接校园卫星网络...</p>
+            </div>
+          </div>
+        </div>
+      )}
       <div id="map-container" className="absolute inset-0 w-full h-full" />
       <div className="absolute bottom-0 left-0 w-full z-10 flex justify-center pb-12 px-4">
         {activeChat ? (
@@ -226,7 +265,7 @@ export default function Home() {
                 </div>
                 <div className="flex space-x-3 mt-2">
                   <button onClick={resetForm} className="flex-1 py-3 bg-gray-200/50 hover:bg-gray-200/80 text-gray-700 font-semibold rounded-xl transition-colors">取消</button>
-                  <button onClick={handleFlash} className="flex-2 w-2/3 py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-xl shadow-md transition-transform active:scale-95">发射气泡</button>
+                  <button onClick={handleFlash} disabled={isSubmitting} className="flex-2 w-2/3 py-3 bg-blue-500 hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-xl shadow-md transition-transform active:scale-95">{isSubmitting ? "发射中..." : "发射气泡"}</button>
                 </div>
               </div>
             )}
