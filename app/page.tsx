@@ -41,7 +41,6 @@ export default function Home() {
       AMapLoader.load({
         key: "f96aae15f8dfda913d2f6cc989677c66",          
         version: "2.0",
-        // 🚀 修复：移除了坑人的 MarkerClusterer 插件
         plugins: ["AMap.Geolocation"],
       }).then((AMap) => {
           mapRef.current = new AMap.Map("map-container", {
@@ -101,12 +100,10 @@ export default function Home() {
 
         marker.on('click', () => { joinChatRoom(bubble.id); });
         
-        // 🚀 核心修复：直接把气泡画到地图上！
         mapRef.current.add(marker); 
         newMarkers.push(marker);
       });
 
-      // 把新画上去的气泡存起来，下次刷新时才知道该删哪些
       markersRef.current = newMarkers;
 
     } catch (e) {
@@ -167,6 +164,17 @@ export default function Home() {
   };
 
   const joinChatRoom = (bubbleId: string) => {
+    // 🚀 绝杀 1：防连点拦截！如果你已经在当前房间里了，并且连接是正常的，直接无视乱点
+    if (activeChat === bubbleId && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      return;
+    }
+
+    // 🚀 绝杀 2：清理门户！在开新房间之前，如果手里还攥着旧连接，无情掐断！
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
     setActiveChat(bubbleId);
     setMessages([]); 
     const ws = new WebSocket(`${WS_URL}/${bubbleId}`);
@@ -182,7 +190,10 @@ export default function Home() {
   };
 
   const exitChat = () => {
-    if (wsRef.current) wsRef.current.close(); 
+    if (wsRef.current) {
+      wsRef.current.close(); 
+      wsRef.current = null;
+    }
     setActiveChat(null);
   };
 
