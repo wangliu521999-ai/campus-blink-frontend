@@ -32,6 +32,14 @@ export default function Home() {
   const [chatInput, setChatInput] = useState("");
   const wsRef = useRef<WebSocket | null>(null);
 
+  // 顶部分类筛选
+  const [filterCategory, setFilterCategory] = useState("all");
+  const filterCategoryRef = useRef("all");
+  // 人数上限滑块
+  const [maxPeople, setMaxPeople] = useState(5);
+  // 聊天室倒计时
+  const [countdown, setCountdown] = useState("");
+
   useEffect(() => {
     // 🚀 初始化：生成或获取本地永久身份证
     let storedId = localStorage.getItem("campus_blink_user_id");
@@ -70,11 +78,34 @@ export default function Home() {
     return () => mapRef.current?.destroy();
   }, []);
 
+  // 分类筛选变化时重新拉取气泡
+  useEffect(() => {
+    filterCategoryRef.current = filterCategory;
+    if (isMapLoaded) fetchBubbles();
+  }, [filterCategory]);
+
+  // 聊天室精准倒计时
+  useEffect(() => {
+    if (!activeChatBubble?.expire_timestamp) { setCountdown(""); return; }
+    const update = () => {
+      const diff = Math.max(0, new Date(activeChatBubble.expire_timestamp).getTime() - Date.now());
+      if (diff === 0) { setCountdown("已销毁"); return; }
+      const m = Math.floor(diff / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      setCountdown(`还有 ${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")} 销毁`);
+    };
+    update();
+    const timer = setInterval(update, 1000);
+    return () => clearInterval(timer);
+  }, [activeChatBubble]);
+
   const fetchBubbles = async (AMapInstance?: any) => {
     const AMap = AMapInstance ?? aMapRef.current;
     if (!AMap || !mapRef.current) return;
+    const cat = filterCategoryRef.current;
+    const url = cat === "all" ? API_URL : `${API_URL}?category=${cat}`;
     try {
-      const res = await fetch(API_URL);
+      const res = await fetch(url);
       const resData = await res.json();
       if (resData.status !== "success") return;
 
@@ -83,29 +114,43 @@ export default function Home() {
       }
 
       const newMarkers: any[] = [];
-      resData.data.forEach((bubble: any) => {
+      const bubbles: any[] = cat !== "all"
+        ? resData.data.filter((b: any) => b.category === cat)
+        : resData.data;
+
+      bubbles.forEach((bubble: any) => {
+        const isFull = !!(bubble.max_people && (bubble.current_people ?? 0) >= bubble.max_people);
+        const displayIcon = isFull ? '🚫' : bubble.icon;
+        const borderClass = isFull
+          ? 'border-gray-300 bg-gray-100 opacity-70'
+          : 'border-gray-100 bg-white';
+
         const timeTagHtml = bubble.category === 'activity' && bubble.start_time && bubble.end_time
           ? `<div class="text-[10px] text-green-700 font-bold mt-1 bg-green-100/80 px-2 py-0.5 rounded w-max border border-green-200">⏰ ${bubble.start_time} - ${bubble.end_time}</div>`
+          : '';
+
+        const peopleTagHtml = bubble.max_people
+          ? `<div class="text-[10px] ${isFull ? 'text-gray-400' : 'text-blue-600'} font-bold mt-1 px-2 py-0.5 rounded w-max border ${isFull ? 'bg-gray-100 border-gray-200' : 'bg-blue-50/80 border-blue-100'}">👥 在线: ${bubble.current_people ?? 0}/${bubble.max_people}${isFull ? ' 已满' : ''}</div>`
           : '';
 
         const marker = new AMap.Marker({
           position: [bubble.lng, bubble.lat],
           content: `
-            <div class="bg-white px-3 py-2 rounded-2xl shadow-lg border border-gray-100 flex flex-col animate-bounce cursor-pointer hover:bg-gray-50 transition-colors">
+            <div class="${borderClass} px-3 py-2 rounded-2xl shadow-lg border flex flex-col ${isFull ? '' : 'animate-bounce'} cursor-pointer hover:opacity-90 transition-all">
               <div class="flex items-center space-x-2">
-                <span class="text-xl">${bubble.icon}</span>
-                <span class="text-sm font-medium text-gray-800">${bubble.text}</span>
+                <span class="text-xl">${displayIcon}</span>
+                <span class="text-sm font-medium ${isFull ? 'text-gray-400' : 'text-gray-800'}">${bubble.text}</span>
               </div>
               ${timeTagHtml}
+              ${peopleTagHtml}
             </div>
           `,
           offset: new AMap.Pixel(-50, -50),
         });
 
-        // 🚀 修改：把整个 bubble 对象传进聊天室
-        marker.on('click', () => { joinChatRoom(bubble); });
-        
-        mapRef.current.add(marker); 
+        marker.on('click', () => { if (!isFull) joinChatRoom(bubble); });
+
+        mapRef.current.add(marker);
         newMarkers.push(marker);
       });
       markersRef.current = newMarkers;
@@ -117,10 +162,11 @@ export default function Home() {
     if (!text) return;
 
     const newBubble = {
-      user_id: myUserId, // 🚀 提交时带上自己的专属身份证
+      user_id: myUserId,
       lat: currentPos[1], lng: currentPos[0],
       icon: icon || "📍", text: text, expire_minutes: expireMinutes,
       category: category,
+      max_people: maxPeople,
       start_time: category === "activity" && startTime ? startTime : null,
       end_time: category === "activity" && endTime ? endTime : null,
     };
@@ -160,7 +206,7 @@ export default function Home() {
     } catch (e) { alert("网络异常，撤销失败"); }
   };
 
-  const resetForm = () => { setText(""); setShowForm(false); setCategory("chat"); setStartTime(""); setEndTime(""); setExpireMinutes(120); setIcon("📍"); };
+  const resetForm = () => { setText(""); setShowForm(false); setCategory("chat"); setStartTime(""); setEndTime(""); setExpireMinutes(120); setIcon("📍"); setMaxPeople(5); };
   const toggleCategory = (cat: string) => { setCategory(cat); setExpireMinutes(cat === "activity" ? 720 : 120); };
 
   const joinChatRoom = (bubble: any) => {
@@ -185,6 +231,24 @@ export default function Home() {
 
   return (
     <main className="relative w-full h-screen overflow-hidden bg-gray-100">
+      {/* 顶部分类筛选栏 */}
+      <div className="absolute top-0 left-0 w-full z-20 flex justify-center pt-4 px-4 pointer-events-none">
+        <div className="flex space-x-2 bg-white/80 backdrop-blur-xl rounded-full px-3 py-2 shadow-lg border border-white/60 pointer-events-auto">
+          {([{ label: "全部", val: "all" }, { label: "💬 吐槽", val: "chat" }, { label: "🏀 约局", val: "activity" }] as const).map((item) => (
+            <button
+              key={item.val}
+              onClick={() => setFilterCategory(item.val)}
+              className={`px-4 py-1.5 rounded-full text-sm font-bold transition-all duration-200 ${
+                filterCategory === item.val
+                  ? "bg-blue-500 text-white shadow-md"
+                  : "text-gray-500 hover:bg-gray-100"
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
       {isLoading && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 to-indigo-100">
           <div className="flex flex-col items-center space-y-5 p-10 rounded-3xl bg-white/80 backdrop-blur-xl shadow-2xl border border-white/60">
@@ -201,9 +265,14 @@ export default function Home() {
         {activeChatBubble ? (
            <div className="w-full max-w-md bg-white/80 backdrop-blur-xl border border-white shadow-2xl rounded-[2rem] p-6 flex flex-col h-80 animate-in slide-in-from-bottom-8">
              <div className="flex justify-between items-center mb-4 border-b border-gray-200 pb-2">
-                <h2 className="font-bold text-gray-800 flex items-center gap-2">
-                  {activeChatBubble.icon} 临时聊天室
-                </h2>
+                <div>
+                  <h2 className="font-bold text-gray-800 flex items-center gap-2">
+                    {activeChatBubble.icon} 临时聊天室
+                  </h2>
+                  {countdown && (
+                    <p className="text-[11px] text-orange-500 font-bold mt-0.5 animate-pulse">{countdown}</p>
+                  )}
+                </div>
                 <div className="flex gap-2">
                   {/* 🚀 只有当发起人是自己时，才显示红色的撤销按钮 */}
                   {myUserId === activeChatBubble.user_id && (
@@ -264,6 +333,19 @@ export default function Home() {
                     <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="border-none p-1.5 rounded-lg bg-white text-sm flex-1 focus:ring-2 focus:ring-green-400 outline-none text-gray-700 shadow-sm" />
                   </div>
                 )}
+                <div className="pt-1">
+                  <p className="text-[11px] text-gray-400 mb-1.5 ml-1 font-medium">
+                    最多参与人数: <span className="font-bold text-blue-500">{maxPeople} 人</span>
+                  </p>
+                  <input
+                    type="range" min={1} max={20} step={1} value={maxPeople}
+                    onChange={(e) => setMaxPeople(Number(e.target.value))}
+                    className="w-full accent-blue-500 h-2 cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[10px] text-gray-400 px-0.5 mt-1 mb-1">
+                    <span>1 人</span><span>10 人</span><span>20 人</span>
+                  </div>
+                </div>
                 <div className="pt-1">
                   <p className="text-[11px] text-gray-400 mb-1.5 ml-1 font-medium">气泡将在多久后消失？</p>
                   <div className="flex bg-gray-100/50 p-1 rounded-xl gap-1">
