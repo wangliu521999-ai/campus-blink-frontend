@@ -84,12 +84,16 @@ export default function Home() {
     if (isMapLoaded) fetchBubbles();
   }, [filterCategory]);
 
-  // 聊天室精准倒计时
+ // 聊天室精准倒计时
   useEffect(() => {
     if (!activeChatBubble?.expire_timestamp) { setCountdown(""); return; }
     const update = () => {
-      const diff = Math.max(0, new Date(activeChatBubble.expire_timestamp).getTime() - Date.now());
+      // 🚀 修复：去掉多余的 new Date，直接把后端的秒数乘以 1000 变成毫秒！
+      const expireTimeMs = activeChatBubble.expire_timestamp * 1000;
+      const diff = Math.max(0, expireTimeMs - Date.now());
+      
       if (diff === 0) { setCountdown("已销毁"); return; }
+      
       const m = Math.floor(diff / 60000);
       const s = Math.floor((diff % 60000) / 1000);
       setCountdown(`还有 ${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")} 销毁`);
