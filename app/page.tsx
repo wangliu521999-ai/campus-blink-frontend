@@ -13,8 +13,12 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentPos, setCurrentPos] = useState<[number, number] | null>(null);
   
-  // 🚀 新增：本地永久身份证
   const [myUserId, setMyUserId] = useState<string>("");
+
+  // =========================================================================
+  // 🚀 新增：欢迎公告弹窗状态
+  // =========================================================================
+  const [showWelcome, setShowWelcome] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
   const [text, setText] = useState("");
@@ -25,23 +29,18 @@ export default function Home() {
   const [expireMinutes, setExpireMinutes] = useState(120);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // 🚀 修改：不再只存 ID，而是存整个气泡对象，为了判断是不是自己发的
   const [activeChatBubble, setActiveChatBubble] = useState<any>(null);
   const [messages, setMessages] = useState<string[]>([]);
   const [chatInput, setChatInput] = useState("");
   const wsRef = useRef<WebSocket | null>(null);
 
-  // 顶部分类筛选
   const [filterCategory, setFilterCategory] = useState("all");
   const filterCategoryRef = useRef("all");
-  // 人数上限滑块
   const [maxPeople, setMaxPeople] = useState(5);
-  // 聊天室倒计时
   const [countdown, setCountdown] = useState("");
 
   useEffect(() => {
-    // 🚀 初始化：生成或获取本地永久身份证
+    // 1. 初始化身份
     let storedId = localStorage.getItem("campus_blink_user_id");
     if (!storedId) {
       storedId = "user_" + Math.random().toString(36).substr(2, 9);
@@ -49,9 +48,15 @@ export default function Home() {
     }
     setMyUserId(storedId);
 
+    // 🚀 2. 检查是否看过欢迎公告
+    const hasSeenWelcome = localStorage.getItem("campus_blink_welcome");
+    if (!hasSeenWelcome) {
+      setShowWelcome(true);
+    }
+
+    // 3. 加载地图
     import("@amap/amap-jsapi-loader").then((AMapLoaderModule) => {
       const AMapLoader = AMapLoaderModule.default || AMapLoaderModule;
-
       (window as any)._AMapSecurityConfig = { securityJsCode: "99558b885fe17660d8fbf12fce5efcdc" };
 
       AMapLoader.load({
@@ -78,22 +83,17 @@ export default function Home() {
     return () => mapRef.current?.destroy();
   }, []);
 
-  // 分类筛选变化时重新拉取气泡
   useEffect(() => {
     filterCategoryRef.current = filterCategory;
     if (isMapLoaded) fetchBubbles();
   }, [filterCategory]);
 
-  // 聊天室精准倒计时
   useEffect(() => {
     if (!activeChatBubble?.expire_timestamp) { setCountdown(""); return; }
     const update = () => {
-      // 🚀 修复：去掉多余的 new Date，直接把后端的秒数乘以 1000 变成毫秒！
       const expireTimeMs = activeChatBubble.expire_timestamp * 1000;
       const diff = Math.max(0, expireTimeMs - Date.now());
-      
       if (diff === 0) { setCountdown("已销毁"); return; }
-      
       const m = Math.floor(diff / 60000);
       const s = Math.floor((diff % 60000) / 1000);
       setCountdown(`还有 ${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")} 销毁`);
@@ -103,14 +103,9 @@ export default function Home() {
     return () => clearInterval(timer);
   }, [activeChatBubble]);
 
-  // =========================================================================
-  // 🚀 新增：全自动雷达扫描（每 15 秒偷偷刷新地图气泡，实现伪实时体验）
-  // =========================================================================
   useEffect(() => {
     if (!isMapLoaded) return;
-    const radar = setInterval(() => {
-      fetchBubbles(); // 偷偷去服务器拿最新数据
-    }, 15000); // 15000 毫秒 = 15 秒
+    const radar = setInterval(() => { fetchBubbles(); }, 15000); 
     return () => clearInterval(radar);
   }, [isMapLoaded]);
 
@@ -124,29 +119,21 @@ export default function Home() {
       const resData = await res.json();
       if (resData.status !== "success") return;
 
-      if (markersRef.current.length > 0) {
-        mapRef.current.remove(markersRef.current);
-      }
+      if (markersRef.current.length > 0) mapRef.current.remove(markersRef.current);
 
       const newMarkers: any[] = [];
-      const bubbles: any[] = cat !== "all"
-        ? resData.data.filter((b: any) => b.category === cat)
-        : resData.data;
+      const bubbles: any[] = cat !== "all" ? resData.data.filter((b: any) => b.category === cat) : resData.data;
 
       bubbles.forEach((bubble: any) => {
         const isFull = !!(bubble.max_people && (bubble.current_people ?? 0) >= bubble.max_people);
         const displayIcon = isFull ? '🚫' : bubble.icon;
-        const borderClass = isFull
-          ? 'border-gray-300 bg-gray-100 opacity-70'
-          : 'border-gray-100 bg-white';
+        const borderClass = isFull ? 'border-gray-300 bg-gray-100 opacity-70' : 'border-gray-100 bg-white';
 
         const timeTagHtml = bubble.category === 'activity' && bubble.start_time && bubble.end_time
-          ? `<div class="text-[10px] text-green-700 font-bold mt-1 bg-green-100/80 px-2 py-0.5 rounded w-max border border-green-200">⏰ ${bubble.start_time} - ${bubble.end_time}</div>`
-          : '';
+          ? `<div class="text-[10px] text-green-700 font-bold mt-1 bg-green-100/80 px-2 py-0.5 rounded w-max border border-green-200">⏰ ${bubble.start_time} - ${bubble.end_time}</div>` : '';
 
         const peopleTagHtml = bubble.max_people
-          ? `<div class="text-[10px] ${isFull ? 'text-gray-400' : 'text-blue-600'} font-bold mt-1 px-2 py-0.5 rounded w-max border ${isFull ? 'bg-gray-100 border-gray-200' : 'bg-blue-50/80 border-blue-100'}">👥 在线: ${bubble.current_people ?? 0}/${bubble.max_people}${isFull ? ' 已满' : ''}</div>`
-          : '';
+          ? `<div class="text-[10px] ${isFull ? 'text-gray-400' : 'text-blue-600'} font-bold mt-1 px-2 py-0.5 rounded w-max border ${isFull ? 'bg-gray-100 border-gray-200' : 'bg-blue-50/80 border-blue-100'}">👥 在线: ${bubble.current_people ?? 0}/${bubble.max_people}${isFull ? ' 已满' : ''}</div>` : '';
 
         const marker = new AMap.Marker({
           position: [bubble.lng, bubble.lat],
@@ -164,7 +151,6 @@ export default function Home() {
         });
 
         marker.on('click', () => { if (!isFull) joinChatRoom(bubble); });
-
         mapRef.current.add(marker);
         newMarkers.push(marker);
       });
@@ -177,22 +163,17 @@ export default function Home() {
     if (!text) return;
 
     const newBubble = {
-      user_id: myUserId,
-      lat: currentPos[1], lng: currentPos[0],
-      icon: icon || "📍", text: text, expire_minutes: expireMinutes,
-      category: category,
-      max_people: maxPeople,
+      user_id: myUserId, lat: currentPos[1], lng: currentPos[0],
+      icon: icon || "📍", text, expire_minutes: expireMinutes, category, max_people: maxPeople,
       start_time: category === "activity" && startTime ? startTime : null,
       end_time: category === "activity" && endTime ? endTime : null,
     };
 
     setIsSubmitting(true);
     try {
-      const res = await fetch(API_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newBubble),
-      });
+      const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newBubble) });
       if (!res.ok) {
-        let errMsg = `发送失败（${res.status}）`;
+        let errMsg = `发送失败`;
         try { const errData = await res.json(); errMsg = errData.detail || errData.message; } catch (_) {}
         alert(errMsg); return;
       }
@@ -201,24 +182,21 @@ export default function Home() {
     finally { setIsSubmitting(false); }
   };
 
-  // 🚀 新增：撤销气泡动作
   const handleDeleteBubble = async () => {
     if (!activeChatBubble) return;
     const confirmDelete = window.confirm("确定要撤销这个闪现吗？聊天室将被立即解散！");
     if (!confirmDelete) return;
-
     try {
-      // 携带气泡ID和自己的身份ID去请求删除
       const res = await fetch(`${API_URL}/${activeChatBubble.id}?user_id=${myUserId}`, { method: 'DELETE' });
-      if (res.ok) {
-        alert("撤销成功！地图上的气泡已销毁。");
-        exitChat();
-        fetchBubbles(); // 刷新地图，气泡消失
-      } else {
-        const errData = await res.json();
-        alert(errData.detail || "撤销失败");
-      }
+      if (res.ok) { alert("撤销成功！"); exitChat(); fetchBubbles(); } 
+      else { const errData = await res.json(); alert(errData.detail || "撤销失败"); }
     } catch (e) { alert("网络异常，撤销失败"); }
+  };
+
+  // 🚀 新增：关闭公告并记录状态
+  const closeWelcome = () => {
+    localStorage.setItem("campus_blink_welcome", "true");
+    setShowWelcome(false);
   };
 
   const resetForm = () => { setText(""); setShowForm(false); setCategory("chat"); setStartTime(""); setEndTime(""); setExpireMinutes(120); setIcon("📍"); setMaxPeople(5); };
@@ -227,9 +205,7 @@ export default function Home() {
   const joinChatRoom = (bubble: any) => {
     if (activeChatBubble?.id === bubble.id && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
     if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
-
-    setActiveChatBubble(bubble);
-    setMessages([]); 
+    setActiveChatBubble(bubble); setMessages([]); 
     const ws = new WebSocket(`${WS_URL}/${bubble.id}`);
     ws.onmessage = (event) => setMessages((prev) => [...prev, event.data]);
     wsRef.current = ws;
@@ -246,6 +222,32 @@ export default function Home() {
 
   return (
     <main className="relative w-full h-screen overflow-hidden bg-gray-100">
+      
+      {/* =========================================================================
+          🚀 新增：全屏高斯模糊公告弹窗
+          ========================================================================= */}
+      {showWelcome && (
+        <div className="absolute inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-sm rounded-[2rem] p-8 shadow-2xl flex flex-col items-center text-center animate-in zoom-in-95 duration-300">
+            <div className="w-16 h-16 bg-blue-100 text-blue-500 rounded-full flex items-center justify-center text-3xl mb-5 shadow-inner">
+              👋
+            </div>
+            <h2 className="text-2xl font-black text-gray-800 mb-3 tracking-wide">校内闪现</h2>
+            <div className="text-sm text-gray-600 mb-8 space-y-3 leading-relaxed text-left bg-gray-50 p-4 rounded-2xl w-full">
+              <p>📍 <strong className="text-gray-800">打球/干饭/吐槽</strong>：发个气泡，秒捞校友。</p>
+              <p>⏱️ <strong className="text-blue-500">阅后即焚</strong>：设定时间，到点气泡自动销毁，无痕社交。</p>
+              <p>🔒 <strong className="text-gray-800">临时群聊</strong>：点击气泡进房，人满即止，发起人随时解散。</p>
+            </div>
+            <button
+              onClick={closeWelcome}
+              className="w-full py-3.5 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-bold rounded-xl shadow-lg transition-transform active:scale-95"
+            >
+              我知道了，立即开启
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 顶部分类筛选栏 */}
       <div className="absolute top-0 left-0 w-full z-20 flex justify-center pt-4 px-4 pointer-events-none">
         <div className="flex space-x-2 bg-white/80 backdrop-blur-xl rounded-full px-3 py-2 shadow-lg border border-white/60 pointer-events-auto">
@@ -289,7 +291,6 @@ export default function Home() {
                   )}
                 </div>
                 <div className="flex gap-2">
-                  {/* 🚀 只有当发起人是自己时，才显示红色的撤销按钮 */}
                   {myUserId === activeChatBubble.user_id && (
                     <button onClick={handleDeleteBubble} className="text-white bg-red-500 font-medium hover:bg-red-600 px-3 py-1 rounded-full text-sm shadow-sm transition-transform active:scale-95">撤销闪现</button>
                   )}
