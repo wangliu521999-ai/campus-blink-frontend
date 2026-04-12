@@ -84,7 +84,7 @@ export default function Home() {
     if (isMapLoaded) fetchBubbles();
   }, [filterCategory]);
 
- // 聊天室精准倒计时
+  // 聊天室精准倒计时
   useEffect(() => {
     if (!activeChatBubble?.expire_timestamp) { setCountdown(""); return; }
     const update = () => {
@@ -102,6 +102,17 @@ export default function Home() {
     const timer = setInterval(update, 1000);
     return () => clearInterval(timer);
   }, [activeChatBubble]);
+
+  // =========================================================================
+  // 🚀 新增：全自动雷达扫描（每 15 秒偷偷刷新地图气泡，实现伪实时体验）
+  // =========================================================================
+  useEffect(() => {
+    if (!isMapLoaded) return;
+    const radar = setInterval(() => {
+      fetchBubbles(); // 偷偷去服务器拿最新数据
+    }, 15000); // 15000 毫秒 = 15 秒
+    return () => clearInterval(radar);
+  }, [isMapLoaded]);
 
   const fetchBubbles = async (AMapInstance?: any) => {
     const AMap = AMapInstance ?? aMapRef.current;
