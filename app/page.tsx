@@ -14,10 +14,6 @@ export default function Home() {
   const [currentPos, setCurrentPos] = useState<[number, number] | null>(null);
   
   const [myUserId, setMyUserId] = useState<string>("");
-
-  // =========================================================================
-  // 🚀 新增：欢迎公告弹窗状态
-  // =========================================================================
   const [showWelcome, setShowWelcome] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
@@ -40,7 +36,6 @@ export default function Home() {
   const [countdown, setCountdown] = useState("");
 
   useEffect(() => {
-    // 1. 初始化身份
     let storedId = localStorage.getItem("campus_blink_user_id");
     if (!storedId) {
       storedId = "user_" + Math.random().toString(36).substr(2, 9);
@@ -48,13 +43,9 @@ export default function Home() {
     }
     setMyUserId(storedId);
 
-    // 🚀 2. 检查是否看过欢迎公告
     const hasSeenWelcome = localStorage.getItem("campus_blink_welcome");
-    if (!hasSeenWelcome) {
-      setShowWelcome(true);
-    }
+    if (!hasSeenWelcome) setShowWelcome(true);
 
-    // 3. 加载地图
     import("@amap/amap-jsapi-loader").then((AMapLoaderModule) => {
       const AMapLoader = AMapLoaderModule.default || AMapLoaderModule;
       (window as any)._AMapSecurityConfig = { securityJsCode: "99558b885fe17660d8fbf12fce5efcdc" };
@@ -64,22 +55,17 @@ export default function Home() {
         version: "2.0",
         plugins: ["AMap.Geolocation"],
       }).then((AMap) => {
-          mapRef.current = new AMap.Map("map-container", {
-            zoom: 16, center: [116.397428, 39.90923], 
-          });
-
+          mapRef.current = new AMap.Map("map-container", { zoom: 16, center: [116.397428, 39.90923] });
           const geolocation = new AMap.Geolocation({ enableHighAccuracy: true, zoomToAccuracy: true });
           mapRef.current.addControl(geolocation);
           geolocation.getCurrentPosition((status: string, result: any) => {
             if (status === 'complete') setCurrentPos([result.position.lng, result.position.lat]);
           });
-
           aMapRef.current = AMap;
           setIsMapLoaded(true);
           fetchBubbles(AMap).finally(() => setIsLoading(false));
       }).catch(e => { console.error(e); setIsLoading(false); });
     });
-
     return () => mapRef.current?.destroy();
   }, []);
 
@@ -118,7 +104,6 @@ export default function Home() {
       const res = await fetch(url);
       const resData = await res.json();
       if (resData.status !== "success") return;
-
       if (markersRef.current.length > 0) mapRef.current.remove(markersRef.current);
 
       const newMarkers: any[] = [];
@@ -193,12 +178,7 @@ export default function Home() {
     } catch (e) { alert("网络异常，撤销失败"); }
   };
 
-  // 🚀 新增：关闭公告并记录状态
-  const closeWelcome = () => {
-    localStorage.setItem("campus_blink_welcome", "true");
-    setShowWelcome(false);
-  };
-
+  const closeWelcome = () => { localStorage.setItem("campus_blink_welcome", "true"); setShowWelcome(false); };
   const resetForm = () => { setText(""); setShowForm(false); setCategory("chat"); setStartTime(""); setEndTime(""); setExpireMinutes(120); setIcon("📍"); setMaxPeople(5); };
   const toggleCategory = (cat: string) => { setCategory(cat); setExpireMinutes(cat === "activity" ? 720 : 120); };
 
@@ -212,7 +192,11 @@ export default function Home() {
   };
 
   const sendMessage = () => {
-    if (wsRef.current && chatInput.trim() !== "") { wsRef.current.send(chatInput); setChatInput(""); }
+    if (wsRef.current && chatInput.trim() !== "") { 
+      // 🚀 核心优化：发送 JSON 格式，带上自己的 ID
+      wsRef.current.send(JSON.stringify({ userId: myUserId, text: chatInput })); 
+      setChatInput(""); 
+    }
   };
 
   const exitChat = () => {
@@ -222,93 +206,79 @@ export default function Home() {
 
   return (
     <main className="relative w-full h-screen overflow-hidden bg-gray-100">
-      
-      {/* =========================================================================
-          🚀 新增：全屏高斯模糊公告弹窗
-          ========================================================================= */}
+      {/* 欢迎公告弹窗 */}
       {showWelcome && (
         <div className="absolute inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-300">
           <div className="bg-white w-full max-w-sm rounded-[2rem] p-8 shadow-2xl flex flex-col items-center text-center animate-in zoom-in-95 duration-300">
-            <div className="w-16 h-16 bg-blue-100 text-blue-500 rounded-full flex items-center justify-center text-3xl mb-5 shadow-inner">
-              👋
-            </div>
+            <div className="w-16 h-16 bg-blue-100 text-blue-500 rounded-full flex items-center justify-center text-3xl mb-5 shadow-inner">👋</div>
             <h2 className="text-2xl font-black text-gray-800 mb-3 tracking-wide">校内闪现</h2>
-            <div className="text-sm text-gray-600 mb-8 space-y-3 leading-relaxed text-left bg-gray-50 p-4 rounded-2xl w-full">
-              <p>📍 <strong className="text-gray-800">打球/干饭/吐槽</strong>：发个气泡，秒捞校友。</p>
-              <p>⏱️ <strong className="text-blue-500">阅后即焚</strong>：设定时间，到点气泡自动销毁，无痕社交。</p>
-              <p>🔒 <strong className="text-gray-800">临时群聊</strong>：点击气泡进房，人满即止，发起人随时解散。</p>
+            <div className="text-sm text-gray-600 mb-6 space-y-3 leading-relaxed text-left bg-gray-50 p-4 rounded-2xl w-full">
+              <p>📍 <strong className="text-gray-800">打球/干饭/悬赏</strong>：发个气泡，秒捞校友。</p>
+              <p>⏱️ <strong className="text-blue-500">阅后即焚</strong>：到点气泡自动销毁，无痕社交。</p>
+              <p>🔒 <strong className="text-gray-800">临时群聊</strong>：人满即止，发起人随时解散。</p>
             </div>
-            <button
-              onClick={closeWelcome}
-              className="w-full py-3.5 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-bold rounded-xl shadow-lg transition-transform active:scale-95"
-            >
-              我知道了，立即开启
-            </button>
+            <button onClick={closeWelcome} className="w-full py-3.5 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-bold rounded-xl shadow-lg transition-transform active:scale-95">我知道了，立即开启</button>
+            {/* 🚀 安全合规免责声明 */}
+            <p className="text-[10px] text-gray-400 mt-4 leading-tight">免责声明：平台仅供校园信息交流，线下交易请务必谨慎，涉及资金往来请核实身份。</p>
           </div>
         </div>
       )}
 
-      {/* 顶部分类筛选栏 */}
-      <div className="absolute top-0 left-0 w-full z-20 flex justify-center pt-4 px-4 pointer-events-none">
-        <div className="flex space-x-2 bg-white/80 backdrop-blur-xl rounded-full px-3 py-2 shadow-lg border border-white/60 pointer-events-auto">
-          {([{ label: "全部", val: "all" }, { label: "💬 吐槽", val: "chat" }, { label: "🏀 约局", val: "activity" }] as const).map((item) => (
-            <button
-              key={item.val}
-              onClick={() => setFilterCategory(item.val)}
-              className={`px-4 py-1.5 rounded-full text-sm font-bold transition-all duration-200 ${
-                filterCategory === item.val
-                  ? "bg-blue-500 text-white shadow-md"
-                  : "text-gray-500 hover:bg-gray-100"
-              }`}
-            >
-              {item.label}
-            </button>
+      {/* 🚀 顶部分类筛选栏 (新增悬赏) */}
+      <div className="absolute top-0 left-0 w-full z-20 flex justify-center pt-4 px-2 pointer-events-none">
+        <div className="flex space-x-1.5 bg-white/80 backdrop-blur-xl rounded-full px-2 py-2 shadow-lg border border-white/60 pointer-events-auto overflow-x-auto no-scrollbar">
+          {([{ label: "全部", val: "all" }, { label: "💬 吐槽", val: "chat" }, { label: "🏀 约局", val: "activity" }, { label: "💼 悬赏", val: "reward" }] as const).map((item) => (
+            <button key={item.val} onClick={() => setFilterCategory(item.val)} className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all duration-200 ${filterCategory === item.val ? "bg-blue-500 text-white shadow-md" : "text-gray-500 hover:bg-gray-100"}`}>{item.label}</button>
           ))}
         </div>
       </div>
+
       {isLoading && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 to-indigo-100">
-          <div className="flex flex-col items-center space-y-5 p-10 rounded-3xl bg-white/80 backdrop-blur-xl shadow-2xl border border-white/60">
-            <div className="w-14 h-14 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            <div className="space-y-1 text-center">
-              <p className="text-xl font-bold text-gray-800 tracking-wider">校内闪现</p>
-              <p className="text-sm text-gray-500">正在连接校园卫星网络...</p>
-            </div>
-          </div>
+          <div className="flex flex-col items-center space-y-5 p-10 rounded-3xl bg-white/80 backdrop-blur-xl shadow-2xl border border-white/60"><div className="w-14 h-14 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" /><div className="space-y-1 text-center"><p className="text-xl font-bold text-gray-800 tracking-wider">校内闪现</p><p className="text-sm text-gray-500">正在连接校园卫星网络...</p></div></div>
         </div>
       )}
       <div id="map-container" className="absolute inset-0 w-full h-full" />
+      
       <div className="absolute bottom-0 left-0 w-full z-10 flex justify-center pb-12 px-4">
         {activeChatBubble ? (
-           <div className="w-full max-w-md bg-white/80 backdrop-blur-xl border border-white shadow-2xl rounded-[2rem] p-6 flex flex-col h-80 animate-in slide-in-from-bottom-8">
-             <div className="flex justify-between items-center mb-4 border-b border-gray-200 pb-2">
+           <div className="w-full max-w-md bg-white/90 backdrop-blur-xl border border-white shadow-2xl rounded-[2rem] p-6 flex flex-col h-96 animate-in slide-in-from-bottom-8">
+             <div className="flex justify-between items-center mb-4 border-b border-gray-200 pb-3">
                 <div>
-                  <h2 className="font-bold text-gray-800 flex items-center gap-2">
-                    {activeChatBubble.icon} 临时聊天室
-                  </h2>
-                  {countdown && (
-                    <p className="text-[11px] text-orange-500 font-bold mt-0.5 animate-pulse">{countdown}</p>
-                  )}
+                  <h2 className="font-bold text-gray-800 flex items-center gap-2">{activeChatBubble.icon} 临时聊天室</h2>
+                  {countdown && <p className="text-[11px] text-orange-500 font-bold mt-0.5 animate-pulse">{countdown}</p>}
                 </div>
                 <div className="flex gap-2">
-                  {myUserId === activeChatBubble.user_id && (
-                    <button onClick={handleDeleteBubble} className="text-white bg-red-500 font-medium hover:bg-red-600 px-3 py-1 rounded-full text-sm shadow-sm transition-transform active:scale-95">撤销闪现</button>
-                  )}
+                  {myUserId === activeChatBubble.user_id && (<button onClick={handleDeleteBubble} className="text-white bg-red-500 font-medium hover:bg-red-600 px-3 py-1 rounded-full text-sm shadow-sm transition-transform active:scale-95">撤销</button>)}
                   <button onClick={exitChat} className="text-gray-500 font-medium hover:bg-gray-100 px-3 py-1 rounded-full text-sm border border-gray-200">撤退</button>
                 </div>
              </div>
-             <div className="flex-1 overflow-y-auto mb-4 space-y-2 flex flex-col">
+             <div className="flex-1 overflow-y-auto mb-4 space-y-3 flex flex-col px-1">
                 {messages.length === 0 ? <p className="text-gray-400 text-sm text-center mt-10">对方正在等你的消息...</p> : null}
-                {messages.map((msg, idx) => {
-                  const isSystemWarning = msg.includes("⚠️ 发起人已撤销");
+                {messages.map((rawMsg, idx) => {
+                  // 🚀 核心优化：解析 JSON 并实现 微信式的左右对话 UI
+                  let msgObj = { userId: "unknown", text: rawMsg };
+                  try { msgObj = JSON.parse(rawMsg); } catch(e) {}
+                  
+                  const isSystem = msgObj.userId === "system" || msgObj.text.includes("⚠️") || msgObj.text.includes("👋");
+                  const isMe = msgObj.userId === myUserId;
+
+                  if (isSystem) {
+                    return <div key={idx} className="text-center w-full my-1"><span className="bg-gray-100 text-gray-500 text-[10px] px-3 py-1 rounded-full">{msgObj.text}</span></div>
+                  }
+
                   return (
-                    <div key={idx} className={`px-4 py-2 rounded-2xl w-fit max-w-[80%] break-words shadow-sm ${isSystemWarning ? 'bg-red-100 text-red-700 w-full text-center mx-auto text-xs font-bold' : 'bg-blue-100 text-blue-900'}`}>{msg}</div>
+                    <div key={idx} className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`px-4 py-2.5 rounded-2xl max-w-[75%] break-words shadow-sm text-sm ${isMe ? 'bg-blue-500 text-white rounded-tr-sm' : 'bg-white border border-gray-100 text-gray-800 rounded-tl-sm'}`}>
+                        {msgObj.text}
+                      </div>
+                    </div>
                   )
                 })}
              </div>
-             <div className="flex space-x-2">
-               <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && sendMessage()} placeholder="说点什么..." className="flex-1 px-4 py-2 rounded-xl bg-white border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-400" />
-               <button onClick={sendMessage} className="bg-blue-500 hover:bg-blue-600 text-white px-5 py-2 rounded-xl font-bold shadow-md transition-transform active:scale-95">发送</button>
+             <div className="flex space-x-2 pt-2 border-t border-gray-100">
+               <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && sendMessage()} placeholder="说点什么..." className="flex-1 px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-400 text-sm" />
+               <button onClick={sendMessage} className="bg-blue-500 hover:bg-blue-600 text-white px-5 py-2.5 rounded-xl font-bold shadow-md transition-transform active:scale-95 text-sm">发送</button>
              </div>
            </div>
         ) : (
@@ -324,9 +294,11 @@ export default function Home() {
               </>
             ) : (
               <div className="w-full space-y-4 animate-in fade-in slide-in-from-bottom-4">
+                {/* 🚀 发射表单分类增加悬赏 */}
                 <div className="flex gap-2 w-full">
-                  <button onClick={() => toggleCategory("chat")} className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${category === "chat" ? "bg-blue-100 text-blue-700 ring-2 ring-blue-400" : "bg-white/50 text-gray-500 hover:bg-white"}`}>💬 吐槽/心情</button>
-                  <button onClick={() => toggleCategory("activity")} className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${category === "activity" ? "bg-green-100 text-green-700 ring-2 ring-green-400" : "bg-white/50 text-gray-500 hover:bg-white"}`}>🏀 约局/活动</button>
+                  <button onClick={() => toggleCategory("chat")} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${category === "chat" ? "bg-blue-100 text-blue-700 ring-2 ring-blue-400" : "bg-white/50 text-gray-500 hover:bg-white"}`}>💬 吐槽</button>
+                  <button onClick={() => toggleCategory("activity")} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${category === "activity" ? "bg-green-100 text-green-700 ring-2 ring-green-400" : "bg-white/50 text-gray-500 hover:bg-white"}`}>🏀 约局</button>
+                  <button onClick={() => toggleCategory("reward")} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${category === "reward" ? "bg-purple-100 text-purple-700 ring-2 ring-purple-400" : "bg-white/50 text-gray-500 hover:bg-white"}`}>💼 悬赏</button>
                 </div>
                 <div className="flex items-center space-x-2 bg-white/40 p-1.5 rounded-2xl border border-white/60">
                   <div className="relative flex-shrink-0 group">
@@ -335,12 +307,12 @@ export default function Home() {
                   </div>
                   <div className="w-px h-6 bg-gray-300 mx-1"></div>
                   <div className="flex space-x-2 flex-1 overflow-x-auto scrollbar-hide py-1">
-                    {['🍚', '📚', '🏀', '🎮', '🎤', '🏃', '🐱', '☕️'].map(emoji => (
+                    {['🍚', '📚', '🏀', '🎮', '📷', '🏃', '🐱', '☕️'].map(emoji => (
                       <button key={emoji} onClick={() => setIcon(emoji)} className={`text-xl flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl transition-all ${icon === emoji ? 'bg-white shadow-md scale-110 border border-gray-100' : 'hover:bg-white/70'}`}>{emoji}</button>
                     ))}
                   </div>
                 </div>
-                <input type="text" value={text} onChange={(e) => setText(e.target.value)} placeholder={category === "chat" ? "此时此刻想说点什么..." : "一缺三，速来（比如：二食堂开黑）..."} className="w-full px-4 py-3 rounded-xl bg-white/70 border border-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-800 shadow-inner" />
+                <input type="text" value={text} onChange={(e) => setText(e.target.value)} placeholder={category === "reward" ? "例如：20元求帮忙拿快递..." : "此时此刻想说点什么..."} className="w-full px-4 py-3 rounded-xl bg-white/70 border border-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400 text-gray-800 shadow-inner text-sm" />
                 {category === "activity" && (
                   <div className="flex gap-2 items-center w-full bg-green-50/80 p-2.5 rounded-xl border border-green-200 shadow-inner animate-in zoom-in-95">
                     <span className="text-xs text-green-700 font-bold whitespace-nowrap pl-1">活动时间:</span>
@@ -353,14 +325,8 @@ export default function Home() {
                   <p className="text-[11px] text-gray-400 mb-1.5 ml-1 font-medium">
                     最多参与人数: <span className="font-bold text-blue-500">{maxPeople} 人</span>
                   </p>
-                  <input
-                    type="range" min={1} max={20} step={1} value={maxPeople}
-                    onChange={(e) => setMaxPeople(Number(e.target.value))}
-                    className="w-full accent-blue-500 h-2 cursor-pointer"
-                  />
-                  <div className="flex justify-between text-[10px] text-gray-400 px-0.5 mt-1 mb-1">
-                    <span>1 人</span><span>10 人</span><span>20 人</span>
-                  </div>
+                  <input type="range" min={1} max={20} step={1} value={maxPeople} onChange={(e) => setMaxPeople(Number(e.target.value))} className="w-full accent-blue-500 h-2 cursor-pointer" />
+                  <div className="flex justify-between text-[10px] text-gray-400 px-0.5 mt-1 mb-1"><span>1 人</span><span>10 人</span><span>20 人</span></div>
                 </div>
                 <div className="pt-1">
                   <p className="text-[11px] text-gray-400 mb-1.5 ml-1 font-medium">气泡将在多久后消失？</p>
@@ -371,8 +337,8 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="flex space-x-3 mt-2">
-                  <button onClick={resetForm} className="flex-1 py-3 bg-gray-200/50 hover:bg-gray-200/80 text-gray-700 font-semibold rounded-xl transition-colors">取消</button>
-                  <button onClick={handleFlash} disabled={isSubmitting} className="flex-2 w-2/3 py-3 bg-blue-500 hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-xl shadow-md transition-transform active:scale-95">{isSubmitting ? "发射中..." : "发射气泡"}</button>
+                  <button onClick={resetForm} className="flex-1 py-3 bg-gray-200/50 hover:bg-gray-200/80 text-gray-700 font-semibold rounded-xl transition-colors text-sm">取消</button>
+                  <button onClick={handleFlash} disabled={isSubmitting} className="flex-2 w-2/3 py-3 bg-blue-500 hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-xl shadow-md transition-transform active:scale-95 text-sm">{isSubmitting ? "发射中..." : "发射气泡"}</button>
                 </div>
               </div>
             )}
