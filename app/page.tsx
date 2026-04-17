@@ -5,6 +5,83 @@ import { useEffect, useRef, useState } from "react";
 const API_URL = "https://campus-blink-backend.onrender.com/api/bubbles";
 const WS_URL = "wss://campus-blink-backend.onrender.com/ws";
 
+// 🚀 富文本渲染：支持图片链接、普通网址和文字的三层解析
+function renderRichText(text: string): React.ReactNode {
+  // 匹配所有 HTTP/HTTPS URL
+  const urlRegex = /https?:\/\/[^\s]+/gi;
+  
+  // 测试是否包含任何 URL
+  if (!urlRegex.test(text)) {
+    return <span>{text}</span>;
+  }
+  
+  // 重置正则表达式索引
+  urlRegex.lastIndex = 0;
+  
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match;
+  let keyCounter = 0;
+  
+  while ((match = urlRegex.exec(text)) !== null) {
+    // 添加匹配前的文字
+    if (match.index > lastIndex) {
+      parts.push(
+        <span key={`text-${keyCounter}`}>
+          {text.substring(lastIndex, match.index)}
+        </span>
+      );
+      keyCounter++;
+    }
+    
+    const url = match[0];
+    // 判断是否为图片URL（jpg/jpeg/png/gif/webp）
+    const isImageUrl = /\.(jpg|jpeg|png|gif|webp)(\?[^\s]*)?$/i.test(url);
+    
+    if (isImageUrl) {
+      // 情况1：图片链接 → 渲染为 <img> 标签
+      parts.push(
+        <img
+          key={`img-${keyCounter}`}
+          src={url}
+          alt="shared-image"
+          className="max-w-full h-32 object-cover rounded-xl mt-2 border border-gray-200 shadow-md"
+          onError={(e: any) => {
+            e.target.style.display = "none";
+          }}
+        />
+      );
+    } else {
+      // 情况2：普通网址 → 渲染为可点击的 <a> 标签
+      parts.push(
+        <a
+          key={`link-${keyCounter}`}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-500 underline break-all hover:text-blue-400"
+        >
+          {url}
+        </a>
+      );
+    }
+    
+    keyCounter++;
+    lastIndex = urlRegex.lastIndex;
+  }
+  
+  // 情况3：添加剩余的文字
+  if (lastIndex < text.length) {
+    parts.push(
+      <span key={`text-${keyCounter}`}>
+        {text.substring(lastIndex)}
+      </span>
+    );
+  }
+  
+  return <>{parts}</>;
+}
+
 export default function Home() {
   const mapRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]); 
@@ -15,6 +92,10 @@ export default function Home() {
   
   const [myUserId, setMyUserId] = useState<string>("");
   const [showWelcome, setShowWelcome] = useState(false);
+  const [showProfileSetup, setShowProfileSetup] = useState(false);
+  const [userProfile, setUserProfile] = useState<{ nickname: string; avatar: string; trustScore: number }>({ nickname: "", avatar: "😊", trustScore: 1 });
+  const [profileNickname, setProfileNickname] = useState("");
+  const [profileAvatar, setProfileAvatar] = useState("😊");
 
   const [showForm, setShowForm] = useState(false);
   const [text, setText] = useState("");
@@ -34,6 +115,7 @@ export default function Home() {
   const filterCategoryRef = useRef("all");
   const [maxPeople, setMaxPeople] = useState(5);
   const [countdown, setCountdown] = useState("");
+  const [isScanning, setIsScanning] = useState(false);
 
   useEffect(() => {
     let storedId = localStorage.getItem("campus_blink_user_id");
@@ -42,6 +124,13 @@ export default function Home() {
       localStorage.setItem("campus_blink_user_id", storedId);
     }
     setMyUserId(storedId);
+
+    const storedProfile = localStorage.getItem("campus_blink_profile");
+    if (storedProfile) {
+      setUserProfile(JSON.parse(storedProfile));
+    } else {
+      setShowProfileSetup(true);
+    }
 
     const hasSeenWelcome = localStorage.getItem("campus_blink_welcome");
     if (!hasSeenWelcome) setShowWelcome(true);
@@ -55,7 +144,7 @@ export default function Home() {
         version: "2.0",
         plugins: ["AMap.Geolocation"],
       }).then((AMap) => {
-          mapRef.current = new AMap.Map("map-container", { zoom: 16, center: [116.397428, 39.90923] });
+          mapRef.current = new AMap.Map("map-container", { zoom: 16, center: [116.397428, 39.90923], mapStyle: 'amap://styles/macaron' });
           const geolocation = new AMap.Geolocation({ enableHighAccuracy: true, zoomToAccuracy: true });
           mapRef.current.addControl(geolocation);
           geolocation.getCurrentPosition((status: string, result: any) => {
@@ -96,6 +185,8 @@ export default function Home() {
   }, [isMapLoaded]);
 
   const fetchBubbles = async (AMapInstance?: any) => {
+    setIsScanning(true);
+    setTimeout(() => setIsScanning(false), 1200);
     const AMap = AMapInstance ?? aMapRef.current;
     if (!AMap || !mapRef.current) return;
     const cat = filterCategoryRef.current;
@@ -182,6 +273,15 @@ export default function Home() {
   const resetForm = () => { setText(""); setShowForm(false); setCategory("chat"); setStartTime(""); setEndTime(""); setExpireMinutes(120); setIcon("📍"); setMaxPeople(5); };
   const toggleCategory = (cat: string) => { setCategory(cat); setExpireMinutes(cat === "activity" ? 720 : 120); };
 
+  const saveProfile = () => {
+    if (!profileNickname.trim()) { alert("请输入代号~"); return; }
+    const newProfile = { nickname: profileNickname, avatar: profileAvatar, trustScore: 1 };
+    setUserProfile(newProfile);
+    localStorage.setItem("campus_blink_profile", JSON.stringify(newProfile));
+    setShowProfileSetup(false);
+    setProfileNickname("");
+  };
+
   const joinChatRoom = (bubble: any) => {
     if (activeChatBubble?.id === bubble.id && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
     if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
@@ -189,13 +289,17 @@ export default function Home() {
     const ws = new WebSocket(`${WS_URL}/${bubble.id}`);
     ws.onmessage = (event) => setMessages((prev) => [...prev, event.data]);
     wsRef.current = ws;
+    setUserProfile(prev => ({ ...prev, trustScore: prev.trustScore + 1 }));
+    localStorage.setItem("campus_blink_profile", JSON.stringify({ ...userProfile, trustScore: userProfile.trustScore + 1 }));
   };
 
   const sendMessage = () => {
     if (wsRef.current && chatInput.trim() !== "") { 
-      // 🚀 核心优化：发送 JSON 格式，带上自己的 ID
-      wsRef.current.send(JSON.stringify({ userId: myUserId, text: chatInput })); 
-      setChatInput(""); 
+      // 🚀 核心优化：发送 JSON 格式，带上自己的 ID 和 profile
+      wsRef.current.send(JSON.stringify({ userId: myUserId, text: chatInput, profile: userProfile })); 
+      setChatInput("");
+      setUserProfile(prev => ({ ...prev, trustScore: prev.trustScore + 1 }));
+      localStorage.setItem("campus_blink_profile", JSON.stringify({ ...userProfile, trustScore: userProfile.trustScore + 1 }));
     }
   };
 
@@ -206,6 +310,47 @@ export default function Home() {
 
   return (
     <main className="relative w-full h-screen overflow-hidden bg-gray-100">
+      {/* 名片设置弹窗 - 最优先显示 */}
+      {showProfileSetup && (
+        <div className="absolute inset-0 z-[110] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-sm rounded-[2rem] p-8 shadow-2xl flex flex-col items-center text-center animate-in zoom-in-95 duration-300">
+            <div className="w-16 h-16 bg-purple-100 text-purple-500 rounded-full flex items-center justify-center text-3xl mb-5 shadow-inner">✨</div>
+            <h2 className="text-2xl font-black text-gray-800 mb-3 tracking-wide">创建你的名片</h2>
+            <p className="text-sm text-gray-600 mb-6">选择头像和代号，建立你的社交身份</p>
+            
+            <div className="w-full mb-5 flex justify-center gap-2">
+              <div className="relative flex-shrink-0">
+                <div className="w-16 h-16 text-4xl text-center flex items-center justify-center rounded-2xl bg-gray-50 border-2 border-purple-300 shadow-md">{profileAvatar}</div>
+              </div>
+            </div>
+            
+            <div className="w-full mb-4">
+              <p className="text-xs text-gray-500 font-bold mb-2">选择头像（点击切换）</p>
+              <div className="flex gap-2 justify-center flex-wrap">
+                {['😊', '😎', '🥰', '😜', '🤔', '😍', '🎉', '🚀', '💪', '🌟'].map(emoji => (
+                  <button key={emoji} onClick={() => setProfileAvatar(emoji)} className={`text-2xl w-10 h-10 flex items-center justify-center rounded-xl transition-all ${profileAvatar === emoji ? 'bg-purple-500 scale-110 shadow-lg' : 'bg-gray-100 hover:bg-gray-200'}`}>{emoji}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="w-full mb-6">
+              <p className="text-xs text-gray-500 font-bold mb-2">输入你的代号</p>
+              <input type="text" value={profileNickname} onChange={(e) => setProfileNickname(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && saveProfile()} maxLength={12} placeholder="比如：小王、Jerry..." className="w-full px-4 py-3 rounded-xl bg-gray-50 border-2 border-gray-200 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-200 text-gray-800 text-sm" />
+            </div>
+
+            <button onClick={saveProfile} className="w-full py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold rounded-xl shadow-lg transition-transform active:scale-95">开启社交身份</button>
+            <p className="text-[10px] text-gray-400 mt-3">你的身份将帮助其他用户建立信任</p>
+          </div>
+        </div>
+      )}
+
+      {/* 雷达扫描波纹 */}
+      {isScanning && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-5">
+          <div className="w-24 h-24 bg-blue-300/30 rounded-full animate-ping"></div>
+        </div>
+      )}
+
       {/* 欢迎公告弹窗 */}
       {showWelcome && (
         <div className="absolute inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-300">
@@ -256,8 +401,8 @@ export default function Home() {
              <div className="flex-1 overflow-y-auto mb-4 space-y-3 flex flex-col px-1">
                 {messages.length === 0 ? <p className="text-gray-400 text-sm text-center mt-10">对方正在等你的消息...</p> : null}
                 {messages.map((rawMsg, idx) => {
-                  // 🚀 核心优化：解析 JSON 并实现 微信式的左右对话 UI
-                  let msgObj = { userId: "unknown", text: rawMsg };
+                  // 🚀 核心优化：解析 JSON 并实现 微信式的左右对话 UI + 信任分数徽章
+                  let msgObj = { userId: "unknown", text: rawMsg, profile: { nickname: "匿名用户", avatar: "😊", trustScore: 1 } };
                   try { msgObj = JSON.parse(rawMsg); } catch(e) {}
                   
                   const isSystem = msgObj.userId === "system" || msgObj.text.includes("⚠️") || msgObj.text.includes("👋");
@@ -268,9 +413,19 @@ export default function Home() {
                   }
 
                   return (
-                    <div key={idx} className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`px-4 py-2.5 rounded-2xl max-w-[75%] break-words shadow-sm text-sm ${isMe ? 'bg-blue-500 text-white rounded-tr-sm' : 'bg-white border border-gray-100 text-gray-800 rounded-tl-sm'}`}>
-                        {msgObj.text}
+                    <div key={idx} className={`flex w-full gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                      <div className="flex-shrink-0 text-2xl w-8 h-8 flex items-center justify-center">{msgObj.profile?.avatar || "😊"}</div>
+                      <div className="flex flex-col gap-1 flex-1">
+                        <div className={`flex items-center gap-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                          <span className="text-xs font-semibold text-gray-700">{msgObj.profile?.nickname || "匿名用户"}</span>
+                          <span className="inline-flex items-center gap-0.5 bg-yellow-100 px-2 py-0.5 rounded-full">
+                            <span className="text-sm">🌟</span>
+                            <span className="text-xs font-bold text-yellow-700">{msgObj.profile?.trustScore || 1}</span>
+                          </span>
+                        </div>
+                        <div className={`px-4 py-2.5 rounded-2xl max-w-[75%] break-words shadow-sm text-sm ${isMe ? 'bg-blue-500 text-white rounded-tr-sm ml-auto' : 'bg-white border border-gray-100 text-gray-800 rounded-tl-sm'}`}>
+                          {renderRichText(msgObj.text)}
+                        </div>
                       </div>
                     </div>
                   )
